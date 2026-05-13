@@ -1,0 +1,32 @@
+{
+  "name": "@hooksense/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for HookSense — lets Claude, Cursor, and other MCP clients create webhook endpoints, inspect captured requests, and replay them.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "hooksense-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["mcp", "model-context-protocol", "hooksense", "webhooks", "claude", "cursor"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
