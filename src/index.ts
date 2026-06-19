@@ -260,7 +260,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 // ── Server setup ────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "hooksense", version: "0.1.0" },
+  { name: "hooksense", version: "0.2.0" },
   { capabilities: { tools: {} } },
 );
 
@@ -282,4 +282,4 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write(`hooksense-mcp v0.1.0 listening on stdio (api: ${API_BASE})\n`);
+process.stderr.write(`hooksense-mcp v0.2.0 listening on stdio (api: ${API_BASE})\n`);

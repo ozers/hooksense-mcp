@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ozers/hooksense",
+  "description": "The webhook & callback layer for AI agents. Create a callback URL, wait_for_callback instead of polling, and verify signatures — over MCP.",
+  "repository": {
+    "url": "https://github.com/ozers/hooksense",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@hooksense/mcp",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "HOOKSENSE_TOKEN",
+          "description": "API token from https://hooksense.com/account/tokens",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "HOOKSENSE_API",
+          "description": "Override the API base URL (self-hosted / staging). Defaults to https://hooksense.com",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

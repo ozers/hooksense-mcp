@@ -1,7 +1,12 @@
 {
   "name": "@hooksense/mcp",
-  "version": "0.1.0",
-  "description": "Model Context Protocol server for HookSense — lets Claude, Cursor, and other MCP clients create webhook endpoints, inspect captured requests, and replay them.",
+  "version": "0.2.0",
+  "mcpName": "io.github.ozers/hooksense",
+  "description": "MCP server for HookSense — the webhook & callback layer for AI agents. Create a callback URL, wait_for_callback instead of polling, and verify signatures, from any MCP client.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozers/hooksense"
+  },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -16,7 +21,7 @@
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["mcp", "model-context-protocol", "hooksense", "webhooks", "claude", "cursor"],
+  "keywords": ["mcp", "model-context-protocol", "hooksense", "webhooks", "callbacks", "ai-agents", "wait-for-callback", "claude", "cursor"],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4"
