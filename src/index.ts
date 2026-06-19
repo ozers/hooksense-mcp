@@ -80,9 +80,9 @@ const tools: Tool[] = [
     },
   },
   {
-    name: "create_endpoint",
+    name: "create_callback_endpoint",
     description:
-      "Create a new webhook capture endpoint. Returns the public URL (use this as the webhook destination in your provider's dashboard, e.g. Stripe, GitHub).",
+      "Create a callback endpoint and return its URL. Hand this URL to a long-running/async job (or another agent) as its webhook/callback target, then await the result with wait_for_callback. Also works as a plain webhook capture URL for any provider (Stripe, GitHub, …).",
     inputSchema: {
       type: "object",
       properties: {
@@ -96,40 +96,54 @@ const tools: Tool[] = [
     },
   },
   {
-    name: "list_requests",
+    name: "list_callbacks",
     description:
-      "List webhook requests captured by an endpoint, newest first. Returns a summary (method, status, provider, received_at). Use `get_request` for full payload.",
+      "List callbacks received by an endpoint, newest first. Returns a summary (method, status, provider, received_at). Use `get_callback_payload` for the full body. Tip: read the newest `received_at` and pass it as `after` to wait_for_callback to wait only for what comes next.",
     inputSchema: {
       type: "object",
       properties: {
         slug: { type: "string", description: "Endpoint slug (e.g. 'stripe-prod')" },
-        limit: { type: "number", description: "Max requests to return (1-100, default 20)" },
+        limit: { type: "number", description: "Max callbacks to return (1-100, default 20)" },
       },
       required: ["slug"],
       additionalProperties: false,
     },
   },
   {
-    name: "get_request",
+    name: "get_callback_payload",
     description:
-      "Fetch a single captured request with full headers, body, and metadata. Use this when you need to inspect or diff a specific payload.",
+      "Fetch a single received callback with full headers, decrypted body, and metadata. Use this to read the result of an async job after wait_for_callback or list_callbacks gives you a callback id.",
     inputSchema: {
       type: "object",
       properties: {
-        requestId: { type: "string", description: "Request UUID, from list_requests" },
+        requestId: { type: "string", description: "Callback UUID, from wait_for_callback or list_callbacks" },
       },
       required: ["requestId"],
       additionalProperties: false,
     },
   },
   {
-    name: "replay_request",
+    name: "verify_signature",
     description:
-      "Replay a captured webhook to a target URL. The original headers and body are re-sent unchanged. Use this to test handler changes against a known payload without re-triggering the upstream event.",
+      "Verify the HMAC signature of a received callback against the endpoint's configured secret (Stripe, GitHub, Shopify, or custom), using a timing-safe comparison. Returns whether the callback is authentic and untampered — call this before your agent acts on a payload. Requires the endpoint to have a webhook secret configured and a paid plan.",
     inputSchema: {
       type: "object",
       properties: {
-        requestId: { type: "string", description: "Request UUID to replay" },
+        slug: { type: "string", description: "Endpoint slug the callback belongs to" },
+        requestId: { type: "string", description: "Callback UUID to verify" },
+      },
+      required: ["slug", "requestId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "replay_callback",
+    description:
+      "Replay a received callback to a target URL. The original headers and body are re-sent unchanged — useful to re-drive your handler against a known payload without re-triggering the upstream event.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", description: "Callback UUID to replay" },
         targetUrl: {
           type: "string",
           description: "Where to POST the replayed payload (e.g. http://localhost:3000/webhooks/stripe)",
@@ -159,7 +173,7 @@ const tools: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        slug: { type: "string", description: "Endpoint slug to wait on (from create_endpoint)" },
+        slug: { type: "string", description: "Endpoint slug to wait on (from create_callback_endpoint)" },
         timeoutMs: {
           type: "number",
           description: "How long to block before returning 'pending' (1000–60000, default 30000).",
@@ -185,28 +199,35 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       return JSON.stringify(data, null, 2);
     }
 
-    case "create_endpoint": {
+    case "create_callback_endpoint": {
       const data = await api<{ slug: string }>("/api/endpoints", {
         method: "POST",
         body: args.slug ? { slug: args.slug } : {},
       });
       const url = `${API_BASE}/w/${data.slug}`;
-      return JSON.stringify({ ...data, webhookUrl: url, viewInDashboard: `${API_BASE}/endpoint/${data.slug}` }, null, 2);
+      return JSON.stringify({ ...data, callbackUrl: url, viewInDashboard: `${API_BASE}/endpoint/${data.slug}` }, null, 2);
     }
 
-    case "list_requests": {
+    case "list_callbacks": {
       const slug = String(args.slug);
       const limit = typeof args.limit === "number" ? Math.min(Math.max(1, args.limit), 100) : 20;
       const data = await api(`/api/endpoints/${encodeURIComponent(slug)}/requests?limit=${limit}`);
       return JSON.stringify(data, null, 2);
     }
 
-    case "get_request": {
+    case "get_callback_payload": {
       const data = await api(`/api/requests/${encodeURIComponent(String(args.requestId))}`);
       return JSON.stringify(data, null, 2);
     }
 
-    case "replay_request": {
+    case "verify_signature": {
+      const slug = encodeURIComponent(String(args.slug));
+      const requestId = encodeURIComponent(String(args.requestId));
+      const data = await api(`/api/endpoints/${slug}/verify/${requestId}`);
+      return JSON.stringify(data, null, 2);
+    }
+
+    case "replay_callback": {
       const data = await api(`/api/requests/${encodeURIComponent(String(args.requestId))}/replay`, {
         method: "POST",
         body: { targetUrl: String(args.targetUrl) },
