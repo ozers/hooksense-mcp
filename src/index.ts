@@ -152,6 +152,28 @@ const tools: Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "wait_for_callback",
+    description:
+      "Block until the next webhook (callback) arrives at an endpoint, then return it — instead of polling. Use this for async/long-running work: kick off the job with the endpoint URL as its callback, then call wait_for_callback to receive the result the moment it lands (signature-verified, decrypted). Returns { status: 'received', request } on delivery, or { status: 'pending' } if `timeoutMs` elapses first (just call again to keep waiting). Pass `after` (the receivedAt of the last callback you saw) so a callback that arrived between calls is returned immediately rather than missed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Endpoint slug to wait on (from create_endpoint)" },
+        timeoutMs: {
+          type: "number",
+          description: "How long to block before returning 'pending' (1000–60000, default 30000).",
+        },
+        after: {
+          type: "string",
+          description:
+            "Optional ISO timestamp cursor. Any callback received after this is returned immediately without blocking — pass the previous callback's receivedAt to avoid missing one between calls.",
+        },
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // ── Tool implementations ────────────────────────────────────────────────────
@@ -194,6 +216,18 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 
     case "get_endpoint": {
       const data = await api(`/api/endpoints/${encodeURIComponent(String(args.slug))}`);
+      return JSON.stringify(data, null, 2);
+    }
+
+    case "wait_for_callback": {
+      const slug = encodeURIComponent(String(args.slug));
+      const qs = new URLSearchParams();
+      if (typeof args.timeoutMs === "number") {
+        qs.set("timeout", String(Math.min(60_000, Math.max(1_000, args.timeoutMs))));
+      }
+      if (typeof args.after === "string" && args.after) qs.set("after", args.after);
+      const query = qs.toString();
+      const data = await api(`/api/endpoints/${slug}/wait${query ? `?${query}` : ""}`);
       return JSON.stringify(data, null, 2);
     }
 
