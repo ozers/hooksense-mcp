@@ -1,10 +1,10 @@
 # @hooksense/mcp
 
-Model Context Protocol server for [HookSense](https://hooksense.com). Lets Claude Desktop, Cursor, Claude Code, Continue, and any other MCP client create webhook capture endpoints, inspect captured requests, and replay them — all from your editor or agent session.
+Model Context Protocol server for [HookSense](https://hooksense.com) — the webhook & callback layer for AI agents. Lets Claude Desktop, Cursor, Claude Code, Continue, and any MCP client create a callback URL, **wait for the result instead of polling**, and verify its signature — all from the agent session.
 
 ## Why
 
-Building webhook integrations is a tight feedback loop: send a test event, see what arrived, adjust the handler, repeat. Doing this from a chat-style AI session has always meant copy-paste-ing payloads from a dashboard into the chat. With this MCP server, the agent fetches captured webhooks directly and feeds them into your code.
+Agents that kick off async work — a deploy, a render, a human-in-the-loop approval, a long tool call, another agent — need the result back without burning context on polling loops. With this server the agent creates a callback endpoint, hands the URL to the job, then calls `wait_for_callback` and is woken the instant the webhook lands — signature-verified and decrypted. Stop polling for async results; await them.
 
 ## Setup
 
@@ -47,16 +47,29 @@ Add to `~/.cursor/mcp.json`:
 }
 ```
 
+## Hello callback (60 seconds)
+
+Once configured, ask your agent:
+
+1. **Create** — "Create a callback endpoint." → the agent calls `create_callback_endpoint` and gets back a `callbackUrl` like `https://hooksense.com/w/ab12cd`.
+2. **Fire** — point any job at that URL (or just `curl -X POST <callbackUrl> -d '{"status":"done"}'` from another terminal).
+3. **Await** — "Wait for the callback." → the agent calls `wait_for_callback` and blocks until the webhook lands, then receives `{ status: "received", request: { body, headers, … } }`.
+4. **Verify** (optional) — set a webhook secret on the endpoint, then "Verify the signature." → `verify_signature` confirms the payload is authentic before the agent acts on it.
+
+No polling, no dashboards, no copy-paste.
+
 ## Tools
 
 | Tool | Description |
 |---|---|
-| `list_endpoints` | List your webhook endpoints |
-| `create_endpoint` | Create a new capture endpoint, returns the public webhook URL |
+| `create_callback_endpoint` | Create a callback endpoint; returns the `callbackUrl` |
+| `wait_for_callback` | Block until the next callback lands, then return it (`timeoutMs`, `after` cursor) |
+| `list_callbacks` | List callbacks received by an endpoint (summary view) |
+| `get_callback_payload` | Fetch one callback with full headers + decrypted body |
+| `verify_signature` | Timing-safe HMAC check against the endpoint's configured secret |
+| `replay_callback` | POST a received callback to any target URL |
+| `list_endpoints` | List your endpoints |
 | `get_endpoint` | Get one endpoint's full settings |
-| `list_requests` | List captured requests for an endpoint (summary view) |
-| `get_request` | Fetch one request with full headers + body |
-| `replay_request` | POST a captured request to any target URL |
 
 ## Environment
 
@@ -67,11 +80,11 @@ Add to `~/.cursor/mcp.json`:
 
 ## Example agent prompts
 
-> "Create a webhook endpoint, point Stripe's test mode at it, then show me the most recent payment_intent.succeeded payload."
+> "Create a callback endpoint, use it as the webhook for my Replicate prediction, and wait for the result — then summarize the output."
 
-> "Replay the last 3 captured webhooks against my localhost:3000/webhooks/stripe so I can test my handler refactor."
+> "Open a callback URL, give it to the approval step, and block until a human approves before continuing."
 
-> "Diff the headers between the most recent two captured GitHub pushes."
+> "Wait for the next Stripe callback on `payments-prod`, verify its signature, and tell me the amount."
 
 ## License
 
