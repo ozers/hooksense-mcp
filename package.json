@@ -5,7 +5,7 @@
   "description": "MCP server for HookSense — the webhook & callback layer for AI agents. Create a callback URL, wait_for_callback instead of polling, and verify signatures, from any MCP client.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ozers/hooksense"
+    "url": "https://github.com/ozers/hooksense-mcp"
   },
   "type": "module",
   "main": "dist/index.js",
