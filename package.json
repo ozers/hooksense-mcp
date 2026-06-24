@@ -1,6 +1,6 @@
 {
   "name": "@hooksense/mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "mcpName": "io.github.ozers/hooksense",
   "description": "MCP server for HookSense — the webhook & callback layer for AI agents. Create a callback URL, wait_for_callback instead of polling, and verify signatures, from any MCP client.",
   "repository": {

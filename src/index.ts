@@ -2,16 +2,19 @@
 /**
  * HookSense MCP Server
  *
- * Exposes HookSense's webhook inspection API as MCP tools so LLM-driven
- * coding agents (Claude Desktop, Cursor, Claude Code, Continue, etc.) can
- * create endpoints, inspect captured requests, and replay them — all from
- * inside the user's editor/agent session.
+ * The webhook & callback layer for AI agents, as MCP tools: create a callback
+ * URL, wait_for_callback to block until the webhook lands (signature-verified
+ * and decrypted) instead of polling, verify signatures, and list/replay
+ * callbacks — all from inside the agent session (Claude Desktop, Cursor,
+ * Claude Code, Continue, etc.).
  *
  * Usage:
  *   HOOKSENSE_TOKEN=hsk_xxx npx hooksense-mcp
  *
  * Environment:
- *   HOOKSENSE_TOKEN — required, an API token from /account/tokens
+ *   HOOKSENSE_TOKEN — API token from /account/tokens. Required to CALL tools;
+ *                     the server still starts and lists its tools without it
+ *                     (so registries/catalogs can introspect it).
  *   HOOKSENSE_API   — optional, defaults to https://hooksense.com
  */
 
@@ -26,13 +29,9 @@ import {
 const TOKEN = process.env.HOOKSENSE_TOKEN;
 const API_BASE = (process.env.HOOKSENSE_API || "https://hooksense.com").replace(/\/$/, "");
 
-if (!TOKEN) {
-  process.stderr.write(
-    "hooksense-mcp: HOOKSENSE_TOKEN env var is required.\n" +
-      "Create a token at https://hooksense.com/account/tokens\n",
-  );
-  process.exit(1);
-}
+// The token is required to CALL a tool, but not to start the server or list
+// its tools — that lets MCP registries/catalogs (Glama, etc.) introspect the
+// server without credentials. Missing-token is surfaced per tool call below.
 
 interface ApiOptions {
   method?: string;
@@ -41,6 +40,12 @@ interface ApiOptions {
 }
 
 async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
+  if (!TOKEN) {
+    throw new Error(
+      "HOOKSENSE_TOKEN is not set. Create a token at https://hooksense.com/account/tokens " +
+        "and add it to your MCP client config.",
+    );
+  }
   const headers: Record<string, string> = {
     Authorization: `Bearer ${TOKEN}`,
     "Content-Type": "application/json",
@@ -260,7 +265,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 // ── Server setup ────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "hooksense", version: "0.2.0" },
+  { name: "hooksense", version: "0.2.1" },
   { capabilities: { tools: {} } },
 );
 
@@ -282,4 +287,4 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write(`hooksense-mcp v0.2.0 listening on stdio (api: ${API_BASE})\n`);
+process.stderr.write(`hooksense-mcp v0.2.1 listening on stdio (api: ${API_BASE})\n`);
