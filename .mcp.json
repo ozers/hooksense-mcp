@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hooksense": {
+      "command": "npx",
+      "args": ["-y", "@hooksense/mcp"],
+      "env": {
+        "HOOKSENSE_TOKEN": "${HOOKSENSE_TOKEN}"
+      }
+    }
+  }
+}
