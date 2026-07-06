@@ -1,0 +1,26 @@
+# Smithery registry config — https://smithery.ai/docs/config
+# Lets Smithery launch @hooksense/mcp with the user's token collected via UI.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - hooksenseToken
+    properties:
+      hooksenseToken:
+        type: string
+        title: HookSense API token
+        description: Create one free (no card) at https://hooksense.com/account/tokens
+      apiBase:
+        type: string
+        title: API base URL (optional)
+        description: Override for self-hosted / staging. Defaults to https://hooksense.com
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@hooksense/mcp'],
+      env: {
+        HOOKSENSE_TOKEN: config.hooksenseToken,
+        ...(config.apiBase ? { HOOKSENSE_API: config.apiBase } : {})
+      }
+    })
