@@ -2,7 +2,7 @@
 # introspect the server. The server lists its tools over stdio WITHOUT a token
 # — HOOKSENSE_TOKEN is only needed to actually call a tool — so introspection
 # checks pass with no credentials.
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 

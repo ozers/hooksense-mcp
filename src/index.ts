@@ -3,13 +3,12 @@
  * HookSense MCP Server
  *
  * The webhook & callback layer for AI agents, as MCP tools: create a callback
- * URL, wait_for_callback to block until the webhook lands (signature-verified
- * and decrypted) instead of polling, verify signatures, and list/replay
+ * URL, wait_for_callback to block until the webhook lands (decrypted) instead of polling, verify signatures, and list/replay
  * callbacks — all from inside the agent session (Claude Desktop, Cursor,
  * Claude Code, Continue, etc.).
  *
  * Usage:
- *   HOOKSENSE_TOKEN=hsk_xxx npx hooksense-mcp
+ *   HOOKSENSE_TOKEN=hsk_xxx npx @hooksense/mcp
  *
  * Environment:
  *   HOOKSENSE_TOKEN — API token from /account/tokens. Required to CALL tools;
@@ -37,6 +36,8 @@ interface ApiOptions {
   method?: string;
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -53,7 +54,9 @@ async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T>
   };
   const body = opts.body ? JSON.stringify(opts.body) : undefined;
 
-  const res = await fetch(`${API_BASE}${path}`, { method: opts.method, headers, body });
+  const timeout = AbortSignal.timeout(opts.timeoutMs ?? 30_000);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
+  const res = await fetch(`${API_BASE}${path}`, { method: opts.method, headers, body, signal });
   const text = await res.text();
   let parsed: unknown;
   try {
@@ -77,7 +80,7 @@ const tools: Tool[] = [
   {
     name: "list_endpoints",
     description:
-      "List all webhook endpoints owned by the authenticated user. Returns slug, created_at, and request counts.",
+      "List all webhook endpoints owned by the authenticated user. Returns slug, createdAt, and request counts.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -87,7 +90,7 @@ const tools: Tool[] = [
   {
     name: "create_callback_endpoint",
     description:
-      "Create a callback endpoint and return its URL. Hand this URL to a long-running/async job (or another agent) as its webhook/callback target, then await the result with wait_for_callback. Also works as a plain webhook capture URL for any provider (Stripe, GitHub, …).",
+      "Create a callback endpoint and return its URL. Hand this URL to a long-running/async job (or another agent) as its webhook/callback target, then await the result with wait_for_callback, passing the returned after timestamp so callbacks that arrive before waiting are not missed. Also works as a plain webhook capture URL for any provider (Stripe, GitHub, …).",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,12 +106,12 @@ const tools: Tool[] = [
   {
     name: "list_callbacks",
     description:
-      "List callbacks received by an endpoint, newest first. Returns a summary (method, status, provider, received_at). Use `get_callback_payload` for the full body. Tip: read the newest `received_at` and pass it as `after` to wait_for_callback to wait only for what comes next.",
+      "List callbacks received by an endpoint, newest first. Returns captured requests including their bodies and metadata. Tip: read the newest `receivedAt` and pass it as `after` to wait_for_callback to wait only for what comes next.",
     inputSchema: {
       type: "object",
       properties: {
         slug: { type: "string", description: "Endpoint slug (e.g. 'stripe-prod')" },
-        limit: { type: "number", description: "Max callbacks to return (1-100, default 20)" },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Max callbacks to return (1-100, default 20)" },
       },
       required: ["slug"],
       additionalProperties: false,
@@ -144,14 +147,14 @@ const tools: Tool[] = [
   {
     name: "replay_callback",
     description:
-      "Replay a received callback to a target URL. The original headers and body are re-sent unchanged — useful to re-drive your handler against a known payload without re-triggering the upstream event.",
+      "Replay a received callback to a target URL. The original method and body are re-sent, with unsafe transport headers filtered — useful to re-drive your handler against a known payload without re-triggering the upstream event.",
     inputSchema: {
       type: "object",
       properties: {
         requestId: { type: "string", description: "Callback UUID to replay" },
         targetUrl: {
           type: "string",
-          description: "Where to POST the replayed payload (e.g. http://localhost:3000/webhooks/stripe)",
+          description: "Public HTTP(S) target reachable by the HookSense server. Localhost/private addresses are blocked; use the HookSense CLI for local replay.",
         },
       },
       required: ["requestId", "targetUrl"],
@@ -174,13 +177,13 @@ const tools: Tool[] = [
   {
     name: "wait_for_callback",
     description:
-      "Block until the next webhook (callback) arrives at an endpoint, then return it — instead of polling. Use this for async/long-running work: kick off the job with the endpoint URL as its callback, then call wait_for_callback to receive the result the moment it lands (signature-verified, decrypted). Returns { status: 'received', request } on delivery, or { status: 'pending' } if `timeoutMs` elapses first (just call again to keep waiting). Pass `after` (the receivedAt of the last callback you saw) so a callback that arrived between calls is returned immediately rather than missed.",
+      "Block until the next webhook (callback) arrives at an endpoint, then return it — instead of polling. Receipt alone does not prove a valid signature. Use this for async/long-running work: kick off the job with the endpoint URL as its callback, then call wait_for_callback to receive the result the moment it lands (decrypted; inspect signatureVerification when present or call verify_signature). Returns { status: 'received', request } on delivery, or { status: 'pending' } if `timeoutMs` elapses first (just call again to keep waiting). Pass `after` (the receivedAt of the last callback you saw) so a callback that arrived between calls is returned immediately rather than missed.",
     inputSchema: {
       type: "object",
       properties: {
         slug: { type: "string", description: "Endpoint slug to wait on (from create_callback_endpoint)" },
         timeoutMs: {
-          type: "number",
+          type: "integer", minimum: 1000, maximum: 60000,
           description: "How long to block before returning 'pending' (1000–60000, default 30000).",
         },
         after: {
@@ -197,43 +200,66 @@ const tools: Tool[] = [
 
 // ── Tool implementations ────────────────────────────────────────────────────
 
-async function handleTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function handleTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+  const tool = tools.find((tool) => tool.name === name);
+  if (!tool) throw new Error(`Unknown tool: ${name}`);
+  for (const key of tool.inputSchema.required ?? []) {
+    if (typeof args[key] !== "string" || !(args[key] as string).trim()) throw new Error(`${key} is required`);
+  }
+  for (const [key, value] of Object.entries(args)) {
+    const definition = tool.inputSchema.properties?.[key] as { type?: string; minimum?: number; maximum?: number } | undefined;
+    if (!definition) throw new Error(`Unknown argument: ${key}`);
+    if (definition.type === "string" && typeof value !== "string") throw new Error(`${key} must be a string`);
+    if (definition.type === "integer" && (typeof value !== "number" || !Number.isInteger(value) || value < definition.minimum! || value > definition.maximum!)) throw new Error(`${key} must be an integer from ${definition.minimum} to ${definition.maximum}`);
+  }
+  if (args.after && !Number.isFinite(Date.parse(String(args.after)))) throw new Error("after must be an ISO timestamp");
+  if (args.slug && !/^[a-zA-Z0-9-]{3,32}$/.test(String(args.slug))) throw new Error("slug must be 3–32 letters, numbers, or hyphens");
+  const request = <T = unknown>(path: string, options: ApiOptions = {}) => api<T>(path, { ...options, signal });
   switch (name) {
     case "list_endpoints": {
-      const data = await api<{ endpoints: unknown[] }>("/api/endpoints");
+      const data = await request<{ endpoints: unknown[] }>("/api/endpoints");
       return JSON.stringify(data, null, 2);
     }
 
     case "create_callback_endpoint": {
-      const data = await api<{ slug: string }>("/api/endpoints", {
+      let data = await request<{ slug: string; createdAt: string }>("/api/endpoints", {
         method: "POST",
-        body: args.slug ? { slug: args.slug } : {},
+        body: {},
       });
+      if (args.slug) {
+        try {
+          data = await request<typeof data>(`/api/endpoints/${encodeURIComponent(data.slug)}`, {
+            method: "PATCH", body: { slug: String(args.slug).toLowerCase() },
+          });
+        } catch (error) {
+          throw new Error(`Endpoint ${data.slug} was created, but renaming failed: ${error instanceof Error ? error.message : error}. Reuse this endpoint instead of creating another.`);
+        }
+      }
       const url = `${API_BASE}/w/${data.slug}`;
-      return JSON.stringify({ ...data, callbackUrl: url, viewInDashboard: `${API_BASE}/endpoint/${data.slug}` }, null, 2);
+      return JSON.stringify({ ...data, after: data.createdAt, callbackUrl: url, viewInDashboard: `${API_BASE}/endpoint/${data.slug}` }, null, 2);
     }
 
     case "list_callbacks": {
       const slug = String(args.slug);
       const limit = typeof args.limit === "number" ? Math.min(Math.max(1, args.limit), 100) : 20;
-      const data = await api(`/api/endpoints/${encodeURIComponent(slug)}/requests?limit=${limit}`);
+      const data = await request(`/api/endpoints/${encodeURIComponent(slug)}/requests?limit=${limit}`);
       return JSON.stringify(data, null, 2);
     }
 
     case "get_callback_payload": {
-      const data = await api(`/api/requests/${encodeURIComponent(String(args.requestId))}`);
+      const data = await request(`/api/requests/${encodeURIComponent(String(args.requestId))}`);
       return JSON.stringify(data, null, 2);
     }
 
     case "verify_signature": {
       const slug = encodeURIComponent(String(args.slug));
       const requestId = encodeURIComponent(String(args.requestId));
-      const data = await api(`/api/endpoints/${slug}/verify/${requestId}`);
+      const data = await request(`/api/endpoints/${slug}/verify/${requestId}`);
       return JSON.stringify(data, null, 2);
     }
 
     case "replay_callback": {
-      const data = await api(`/api/requests/${encodeURIComponent(String(args.requestId))}/replay`, {
+      const data = await request(`/api/requests/${encodeURIComponent(String(args.requestId))}/replay`, {
         method: "POST",
         body: { targetUrl: String(args.targetUrl) },
       });
@@ -241,7 +267,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     }
 
     case "get_endpoint": {
-      const data = await api(`/api/endpoints/${encodeURIComponent(String(args.slug))}`);
+      const data = await request(`/api/endpoints/${encodeURIComponent(String(args.slug))}`);
       return JSON.stringify(data, null, 2);
     }
 
@@ -253,7 +279,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       }
       if (typeof args.after === "string" && args.after) qs.set("after", args.after);
       const query = qs.toString();
-      const data = await api(`/api/endpoints/${slug}/wait${query ? `?${query}` : ""}`);
+      const data = await request(`/api/endpoints/${slug}/wait${query ? `?${query}` : ""}`, { timeoutMs: (typeof args.timeoutMs === "number" ? args.timeoutMs : 30_000) + 5_000 });
       return JSON.stringify(data, null, 2);
     }
 
@@ -265,16 +291,16 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 // ── Server setup ────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "hooksense", version: "0.2.1" },
+  { name: "hooksense", version: "0.2.2" },
   { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const { name, arguments: args } = req.params;
   try {
-    const text = await handleTool(name, (args ?? {}) as Record<string, unknown>);
+    const text = await handleTool(name, (args ?? {}) as Record<string, unknown>, extra.signal);
     return { content: [{ type: "text", text }] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -287,4 +313,4 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write(`hooksense-mcp v0.2.1 listening on stdio (api: ${API_BASE})\n`);
+process.stderr.write(`hooksense-mcp v0.2.2 listening on stdio (api: ${API_BASE})\n`);
